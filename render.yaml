@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: hubspot-claude-middleware
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: HUBSPOT_ACCESS_TOKEN
+        sync: false
+      - key: DEBUG
+        value: false
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DEFAULT_COMPANY_LIMIT
+        value: 100
+      - key: MAX_COMPANY_LIMIT
+        value: 200
+      - key: RATE_LIMIT_PER_MINUTE
+        value: 100
+      - key: CACHE_TTL_SECONDS
+        value: 300
