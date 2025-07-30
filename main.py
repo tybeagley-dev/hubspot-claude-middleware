@@ -8,6 +8,7 @@ from services.translator import PropertyTranslator
 from services.query_parser import QueryParser
 from services.property_discovery import PropertyDiscoveryService
 from services.value_discovery import ValueDiscoveryService
+from services.encyclopedia import EncyclopediaService
 
 app = FastAPI(
     title="HubSpot Claude Middleware",
@@ -29,6 +30,7 @@ translator = PropertyTranslator()
 query_parser = QueryParser()
 property_discovery = PropertyDiscoveryService()
 value_discovery = ValueDiscoveryService()
+encyclopedia = EncyclopediaService()
 
 class CompanyQuery(BaseModel):
     query: str
@@ -249,6 +251,61 @@ async def search_values(object_type: str, keyword: str):
             "matches": matching_values
         }
     
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/encyclopedia/export")
+async def export_encyclopedia():
+    """Export complete HubSpot encyclopedia with all mappings"""
+    try:
+        result = await encyclopedia.export_full_encyclopedia()
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Encyclopedia export failed: {str(e)}")
+
+@app.post("/encyclopedia/refresh")
+async def refresh_encyclopedia():
+    """Refresh and save encyclopedia to files"""
+    try:
+        result = await encyclopedia.refresh_encyclopedia()
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Encyclopedia refresh failed: {str(e)}")
+
+@app.get("/encyclopedia/search")
+async def search_encyclopedia(search_term: str, object_type: Optional[str] = None):
+    """Search encyclopedia for properties/values matching a term"""
+    try:
+        results = encyclopedia.search_encyclopedia(search_term, object_type)
+        return {
+            "search_term": search_term,
+            "object_type": object_type or "all",
+            "results": results
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Encyclopedia search failed: {str(e)}")
+
+@app.get("/encyclopedia/load/{object_type}")
+async def load_encyclopedia_data(object_type: str):
+    """Load saved encyclopedia data for specific object type"""
+    try:
+        valid_types = ["companies", "contacts", "deals", "tickets"]
+        if object_type not in valid_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid object type. Must be one of: {valid_types}"
+            )
+        
+        data = encyclopedia.load_encyclopedia(object_type)
+        if not data:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No encyclopedia data found for {object_type}. Run /encyclopedia/refresh first."
+            )
+        
+        return data
     except HTTPException:
         raise
     except Exception as e:
