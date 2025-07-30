@@ -157,17 +157,18 @@ class QueryParser:
         
         # Status-based queries
         if "active customers" in query or "active companies" in query:
+            # Since there's no explicit "active" status, search for companies that are NOT inactive/cancelled
             filters.append({
-                "propertyName": "lifecyclestage",
-                "operator": "EQ",
-                "value": "customer"
+                "propertyName": "account_status",
+                "operator": "NOT_IN",
+                "values": ["cancelled", "inactive", "Pending Cancellation"]
             })
         
         if "cancelled" in query or "canceled" in query:
             filters.append({
                 "propertyName": "account_status",
-                "operator": "EQ", 
-                "value": "cancelled"
+                "operator": "IN", 
+                "values": ["cancelled", "Pending Cancellation"]
             })
         
         # Date-based queries
@@ -186,6 +187,15 @@ class QueryParser:
                 "propertyName": "annualrevenue",
                 "operator": "GT",
                 "value": "1000000"
+            })
+        
+        # Owner-based queries
+        if "tyler beagley" in query or "tyler's" in query:
+            # This would need the actual HubSpot owner ID - for now, search by owner name
+            filters.append({
+                "propertyName": "ownername",
+                "operator": "CONTAINS_TOKEN",
+                "value": "Tyler Beagley"
             })
         
         return filters
