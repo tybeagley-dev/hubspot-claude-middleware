@@ -7,6 +7,7 @@ from services.hubspot_client import HubSpotClient
 from services.translator import PropertyTranslator
 from services.query_parser import QueryParser
 from services.property_discovery import PropertyDiscoveryService
+from services.value_discovery import ValueDiscoveryService
 
 app = FastAPI(
     title="HubSpot Claude Middleware",
@@ -27,6 +28,7 @@ hubspot_client = HubSpotClient()
 translator = PropertyTranslator()
 query_parser = QueryParser()
 property_discovery = PropertyDiscoveryService()
+value_discovery = ValueDiscoveryService()
 
 class CompanyQuery(BaseModel):
     query: str
@@ -50,7 +52,7 @@ async def search_companies(query: CompanyQuery):
     """Search for companies based on natural language query"""
     try:
         # Parse the natural language query
-        parsed_query = query_parser.parse(query.query)
+        parsed_query = await query_parser.parse(query.query)
         
         # Search companies using HubSpot API
         companies = await hubspot_client.search_companies(
@@ -188,6 +190,63 @@ async def refresh_properties(object_types: Optional[List[str]] = None):
         return {
             "message": "Property mappings refreshed successfully",
             "refreshed_counts": results
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/values/discover/{object_type}")
+async def discover_values(object_type: str):
+    """Discover all property values (labels -> internal values) for a HubSpot object type"""
+    try:
+        valid_types = ["companies", "contacts", "deals", "tickets"]
+        if object_type not in valid_types:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid object type. Must be one of: {valid_types}"
+            )
+        
+        value_mappings = await value_discovery.discover_all_property_values(object_type)
+        
+        # Calculate total values across all properties
+        total_values = sum(len(values) for values in value_mappings.values())
+        
+        return {
+            "object_type": object_type,
+            "total_properties": len(value_mappings),
+            "total_values": total_values,
+            "property_values": value_mappings,
+            "sample_mappings": {
+                prop: dict(list(values.items())[:5])  # Show first 5 values per property
+                for prop, values in list(value_mappings.items())[:3]  # Show first 3 properties
+            }
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/values/search/{object_type}")
+async def search_values(object_type: str, keyword: str):
+    """Search for property values that match a keyword"""
+    try:
+        valid_types = ["companies", "contacts", "deals", "tickets"]
+        if object_type not in valid_types:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid object type. Must be one of: {valid_types}"
+            )
+        
+        matching_values = await value_discovery.search_values_by_keyword(object_type, keyword)
+        
+        return {
+            "object_type": object_type,
+            "keyword": keyword,
+            "matching_properties": len(matching_values),
+            "matches": matching_values
         }
     
     except HTTPException:

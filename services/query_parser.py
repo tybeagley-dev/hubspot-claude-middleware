@@ -5,11 +5,13 @@ Natural language query parser for converting human queries to HubSpot API filter
 import re
 from typing import Dict, List, Any, Optional
 from config.mappings import REVERSE_PROPERTY_MAPPINGS, REVERSE_VALUE_MAPPINGS
+from .value_discovery import ValueDiscoveryService
 
 class QueryParser:
     def __init__(self):
         self.property_mappings = REVERSE_PROPERTY_MAPPINGS
         self.value_mappings = REVERSE_VALUE_MAPPINGS
+        self.value_discovery = ValueDiscoveryService()
         
         # Common operators and their HubSpot equivalents
         self.operators = {
@@ -37,7 +39,7 @@ class QueryParser:
             "not in": "NOT_IN"
         }
     
-    def parse(self, query: str) -> Dict[str, Any]:
+    async def parse(self, query: str) -> Dict[str, Any]:
         """
         Parse natural language query into HubSpot API filters
         
@@ -58,7 +60,7 @@ class QueryParser:
         }
         
         # Extract filters from the query
-        filters = self._extract_filters(query)
+        filters = await self._extract_filters(query)
         result["filters"] = filters
         
         # Extract sorting information
@@ -78,7 +80,7 @@ class QueryParser:
         
         return result
     
-    def _extract_filters(self, query: str) -> List[Dict[str, Any]]:
+    async def _extract_filters(self, query: str) -> List[Dict[str, Any]]:
         """Extract filter conditions from the query"""
         filters = []
         
@@ -116,7 +118,7 @@ class QueryParser:
                 else:
                     # Single value operators
                     value = value.strip('"\'')
-                    mapped_value = self._map_property_value(hubspot_property, value)
+                    mapped_value = await self._map_property_value(hubspot_property, value)
                     
                     filters.append({
                         "propertyName": hubspot_property,
@@ -125,11 +127,12 @@ class QueryParser:
                     })
         
         # Handle special cases and common phrases
-        filters.extend(self._handle_special_cases(query))
+        special_filters = await self._handle_special_cases(query)
+        filters.extend(special_filters)
         
         return filters
     
-    def _handle_special_cases(self, query: str) -> List[Dict[str, Any]]:
+    async def _handle_special_cases(self, query: str) -> List[Dict[str, Any]]:
         """Handle common query patterns and phrases"""
         filters = []
         
@@ -189,15 +192,16 @@ class QueryParser:
                 "value": "1000000"
             })
         
-        # Owner-based queries - search by actual owner ID, not name
+        # Owner-based queries - use Value Discovery to find actual owner ID
         if "tyler beagley" in query or "tyler's" in query:
-            # For debugging: find companies with ANY owner assigned
-            # This should return companies that have owners, then we can identify Tyler's ID
-            filters.append({
-                "propertyName": "hubspot_owner_id",
-                "operator": "NOT_EQ",
-                "value": ""  # Find companies that have an owner (non-empty owner ID)
-            })
+            # Use Value Discovery to map "Tyler Beagley" to actual owner ID
+            tyler_id = await self.value_discovery.map_value_to_internal("companies", "hubspot_owner_id", "Tyler Beagley")
+            if tyler_id != "Tyler Beagley":  # Only add filter if mapping was found
+                filters.append({
+                    "propertyName": "hubspot_owner_id",
+                    "operator": "EQ",
+                    "value": tyler_id
+                })
         
         return filters
     
@@ -291,11 +295,20 @@ class QueryParser:
         # Return as-is with underscores if no mapping found
         return cleaned_name.replace(' ', '_')
     
-    def _map_property_value(self, property_name: str, value: str) -> str:
-        """Map human-readable property value to HubSpot value"""
+    async def _map_property_value(self, property_name: str, value: str) -> str:
+        """Map human-readable property value to HubSpot value using Value Discovery"""
+        # First try static mappings for backward compatibility
         if property_name in self.value_mappings:
             value_lower = value.lower()
             mapping = self.value_mappings[property_name]
-            return mapping.get(value_lower, value)
+            static_result = mapping.get(value_lower, value)
+            if static_result != value:
+                return static_result
         
-        return value
+        # Use Value Discovery for dynamic mapping
+        try:
+            dynamic_result = await self.value_discovery.map_value_to_internal("companies", property_name, value)
+            return dynamic_result
+        except Exception as e:
+            print(f"Warning: Could not map value '{value}' for property '{property_name}': {e}")
+            return value
