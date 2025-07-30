@@ -6,6 +6,7 @@ import os
 from services.hubspot_client import HubSpotClient
 from services.translator import PropertyTranslator
 from services.query_parser import QueryParser
+from services.property_discovery import PropertyDiscoveryService
 
 app = FastAPI(
     title="HubSpot Claude Middleware",
@@ -25,6 +26,7 @@ app.add_middleware(
 hubspot_client = HubSpotClient()
 translator = PropertyTranslator()
 query_parser = QueryParser()
+property_discovery = PropertyDiscoveryService()
 
 class CompanyQuery(BaseModel):
     query: str
@@ -133,6 +135,63 @@ async def list_companies(
             total=len(translated_companies)
         )
     
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/properties/discover/{object_type}")
+async def discover_properties(object_type: str):
+    """Discover and return all properties for a HubSpot object type"""
+    try:
+        valid_types = ["companies", "contacts", "deals", "tickets"]
+        if object_type not in valid_types:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid object type. Must be one of: {valid_types}"
+            )
+        
+        mappings = await property_discovery.fetch_all_properties(object_type)
+        
+        return {
+            "object_type": object_type,
+            "total_properties": len(mappings),
+            "mappings": mappings,
+            "sample": dict(list(mappings.items())[:10])  # Show first 10 as sample
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/properties/refresh")
+async def refresh_properties(object_types: Optional[List[str]] = None):
+    """Force refresh of property mappings cache"""
+    try:
+        if object_types:
+            # Validate object types
+            valid_types = ["companies", "contacts", "deals", "tickets"]
+            invalid_types = [t for t in object_types if t not in valid_types]
+            if invalid_types:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid object types: {invalid_types}"
+                )
+        
+        results = {}
+        if object_types:
+            for obj_type in object_types:
+                count_result = await property_discovery.refresh_cache(obj_type)
+                results.update(count_result)
+        else:
+            results = await property_discovery.refresh_cache()
+        
+        return {
+            "message": "Property mappings refreshed successfully",
+            "refreshed_counts": results
+        }
+    
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
