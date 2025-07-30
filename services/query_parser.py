@@ -105,10 +105,11 @@ class QueryParser:
                 # Handle IN/NOT_IN operators with multiple values
                 if operator in ["in", "not in"]:
                     values = [v.strip().strip('"\'') for v in value.split(',')]
-                    # Map values if needed
-                    mapped_values = [
-                        self._map_property_value(hubspot_property, v) for v in values
-                    ]
+                    # Map values using Value Discovery - literal mapping only
+                    mapped_values = []
+                    for v in values:
+                        mapped_value = await self._map_property_value(hubspot_property, v)
+                        mapped_values.append(mapped_value)
                     
                     filters.append({
                         "propertyName": hubspot_property,
@@ -133,49 +134,120 @@ class QueryParser:
         return filters
     
     async def _handle_special_cases(self, query: str) -> List[Dict[str, Any]]:
-        """Handle common query patterns and phrases"""
+        """Handle literal label mappings using Value Discovery for ALL labels"""
         filters = []
         
-        # Industry-specific queries
-        if "technology" in query or "tech" in query:
-            filters.append({
-                "propertyName": "industry",
-                "operator": "CONTAINS_TOKEN",
-                "value": "Technology"
-            })
+        # Owner-based queries - literal name mapping
+        if "tyler beagley" in query.lower() or "tyler's" in query.lower():
+            tyler_id = await self.value_discovery.map_value_to_internal("companies", "hubspot_owner_id", "Tyler Beagley")
+            if tyler_id != "Tyler Beagley":
+                filters.append({
+                    "propertyName": "hubspot_owner_id",
+                    "operator": "EQ",
+                    "value": tyler_id
+                })
         
-        # Size-based queries
-        if "large companies" in query or "big companies" in query:
-            filters.append({
-                "propertyName": "numberofemployees",
-                "operator": "GT",
-                "value": "1000"
-            })
-        elif "small companies" in query:
-            filters.append({
-                "propertyName": "numberofemployees",
-                "operator": "LT",
-                "value": "100"
-            })
+        # Status-based queries - literal label mapping
+        if "active" in query.lower():
+            active_status = await self.value_discovery.map_value_to_internal("companies", "account_status", "Active")
+            if active_status != "Active":
+                filters.append({
+                    "propertyName": "account_status",
+                    "operator": "EQ",
+                    "value": active_status
+                })
         
-        # Status-based queries
-        if "active customers" in query or "active companies" in query:
-            # Since there's no explicit "active" status, search for companies that are NOT inactive/cancelled
-            filters.append({
-                "propertyName": "account_status",
-                "operator": "NOT_IN",
-                "values": ["cancelled", "inactive", "Pending Cancellation"]
-            })
+        if "cancelled" in query.lower() or "canceled" in query.lower():
+            cancelled_status = await self.value_discovery.map_value_to_internal("companies", "account_status", "Cancelled")
+            if cancelled_status != "Cancelled":
+                filters.append({
+                    "propertyName": "account_status",
+                    "operator": "EQ", 
+                    "value": cancelled_status
+                })
         
-        if "cancelled" in query or "canceled" in query:
-            filters.append({
-                "propertyName": "account_status",
-                "operator": "IN", 
-                "values": ["cancelled", "Pending Cancellation"]
-            })
+        if "inactive" in query.lower():
+            inactive_status = await self.value_discovery.map_value_to_internal("companies", "account_status", "Inactive")
+            if inactive_status != "Inactive":
+                filters.append({
+                    "propertyName": "account_status",
+                    "operator": "EQ",
+                    "value": inactive_status
+                })
         
-        # Date-based queries
-        if "recent" in query or "recently created" in query:
+        # Industry-based queries - literal label mapping
+        if "technology" in query.lower() or "tech" in query.lower():
+            tech_industry = await self.value_discovery.map_value_to_internal("companies", "industry", "Technology")
+            if tech_industry != "Technology":
+                filters.append({
+                    "propertyName": "industry",
+                    "operator": "EQ",
+                    "value": tech_industry
+                })
+        
+        # Company size queries - map to literal tier labels
+        if "large companies" in query.lower() or "big companies" in query.lower():
+            # Try to map "Large" as a literal customer tier or company size label
+            large_tier = await self.value_discovery.map_value_to_internal("companies", "customer_tier", "Large")
+            if large_tier != "Large":
+                filters.append({
+                    "propertyName": "customer_tier",
+                    "operator": "EQ",
+                    "value": large_tier
+                })
+            else:
+                # Fallback to employee count if no tier mapping
+                filters.append({
+                    "propertyName": "numberofemployees",
+                    "operator": "GT",
+                    "value": "1000"
+                })
+        
+        if "small companies" in query.lower():
+            small_tier = await self.value_discovery.map_value_to_internal("companies", "customer_tier", "Small")
+            if small_tier != "Small":
+                filters.append({
+                    "propertyName": "customer_tier",
+                    "operator": "EQ",
+                    "value": small_tier
+                })
+            else:
+                # Fallback to employee count if no tier mapping
+                filters.append({
+                    "propertyName": "numberofemployees",
+                    "operator": "LT",
+                    "value": "100"
+                })
+        
+        # Enterprise/tier queries - literal label mapping
+        if "enterprise" in query.lower():
+            enterprise_tier = await self.value_discovery.map_value_to_internal("companies", "customer_tier", "Enterprise")
+            if enterprise_tier != "Enterprise":
+                filters.append({
+                    "propertyName": "customer_tier",
+                    "operator": "EQ",
+                    "value": enterprise_tier
+                })
+        
+        # Revenue-based queries - try tier mapping first, then fallback to amount
+        if "high revenue" in query.lower():
+            high_revenue_tier = await self.value_discovery.map_value_to_internal("companies", "customer_tier", "High Revenue")
+            if high_revenue_tier != "High Revenue":
+                filters.append({
+                    "propertyName": "customer_tier",
+                    "operator": "EQ",
+                    "value": high_revenue_tier
+                })
+            else:
+                # Fallback to revenue amount if no tier mapping
+                filters.append({
+                    "propertyName": "annualrevenue",
+                    "operator": "GT",
+                    "value": "1000000"
+                })
+        
+        # Date-based queries - for "recent" we keep the logic since it's not a label
+        if "recent" in query.lower() or "recently created" in query.lower():
             from datetime import datetime, timedelta
             thirty_days_ago = int((datetime.now() - timedelta(days=30)).timestamp() * 1000)
             filters.append({
@@ -183,25 +255,6 @@ class QueryParser:
                 "operator": "GTE",
                 "value": str(thirty_days_ago)
             })
-        
-        # Revenue-based queries
-        if "high revenue" in query or "enterprise" in query:
-            filters.append({
-                "propertyName": "annualrevenue",
-                "operator": "GT",
-                "value": "1000000"
-            })
-        
-        # Owner-based queries - use Value Discovery to find actual owner ID
-        if "tyler beagley" in query or "tyler's" in query:
-            # Use Value Discovery to map "Tyler Beagley" to actual owner ID
-            tyler_id = await self.value_discovery.map_value_to_internal("companies", "hubspot_owner_id", "Tyler Beagley")
-            if tyler_id != "Tyler Beagley":  # Only add filter if mapping was found
-                filters.append({
-                    "propertyName": "hubspot_owner_id",
-                    "operator": "EQ",
-                    "value": tyler_id
-                })
         
         return filters
     
