@@ -189,13 +189,14 @@ class QueryParser:
                 "value": "1000000"
             })
         
-        # Owner-based queries
+        # Owner-based queries - search by actual owner ID, not name
         if "tyler beagley" in query or "tyler's" in query:
-            # This would need the actual HubSpot owner ID - for now, search by owner name
+            # For debugging: find companies with ANY owner assigned
+            # This should return companies that have owners, then we can identify Tyler's ID
             filters.append({
-                "propertyName": "ownername",
-                "operator": "CONTAINS_TOKEN",
-                "value": "Tyler Beagley"
+                "propertyName": "hubspot_owner_id",
+                "operator": "NOT_EQ",
+                "value": ""  # Find companies that have an owner (non-empty owner ID)
             })
         
         return filters
