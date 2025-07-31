@@ -24,7 +24,7 @@ class EncyclopediaResolver:
                 value_count = len(data.get('value_mappings', {}))
                 print(f"✅ Loaded {object_type} encyclopedia: {value_count} properties with value mappings")
     
-    async def resolve_and_search(self, object_type: str, user_query: str, limit: int = 200) -> Dict[str, Any]:
+    async def resolve_and_search(self, object_type: str, user_query: str, limit: int = 200, user_email: str = None) -> Dict[str, Any]:
         """
         Encyclopedia-first search: Analyze query thoroughly, then search
         
@@ -40,7 +40,7 @@ class EncyclopediaResolver:
         query_analysis = self._analyze_query_comprehensively(object_type, user_query)
         
         # Step 2: Resolve query to HubSpot filters using analysis
-        filters = self.resolve_query_to_filters(object_type, user_query)
+        filters = self.resolve_query_to_filters(object_type, user_query, user_email)
         
         # Step 3: Execute search
         results = await self._execute_search(object_type, filters, limit)
@@ -149,7 +149,7 @@ class EncyclopediaResolver:
         
         return " ".join(insights) if insights else None
     
-    def resolve_query_to_filters(self, object_type: str, user_query: str) -> List[Dict[str, Any]]:
+    def resolve_query_to_filters(self, object_type: str, user_query: str, user_email: str = None) -> List[Dict[str, Any]]:
         """
         Resolve user query to HubSpot API filters using encyclopedia
         
@@ -171,7 +171,7 @@ class EncyclopediaResolver:
         value_mappings = encyclopedia_data.get('value_mappings', {})
         
         # Owner-based searches
-        owner_filters = self._resolve_owner_queries(query_lower, value_mappings)
+        owner_filters = self._resolve_owner_queries(query_lower, value_mappings, user_email)
         filters.extend(owner_filters)
         
         # Status-based searches  
@@ -200,7 +200,7 @@ class EncyclopediaResolver:
         
         return filters
     
-    def _resolve_owner_queries(self, query: str, value_mappings: Dict) -> List[Dict[str, Any]]:
+    def _resolve_owner_queries(self, query: str, value_mappings: Dict, user_email: str = None) -> List[Dict[str, Any]]:
         """Resolve owner-based queries using encyclopedia"""
         filters = []
         
@@ -213,7 +213,7 @@ class EncyclopediaResolver:
             
             # Only look for owner names if query explicitly mentions ownership or person names
             # Skip owner matching for generic location/status queries
-            owner_indicators = ["owner", "owned by", "'s", "portfolio"]
+            owner_indicators = ["owner", "owned by", "'s", "portfolio", "my name", "in my name", "tyler beagley"]
             has_owner_context = any(indicator in query for indicator in owner_indicators)
             
             if not has_owner_context:
@@ -225,6 +225,17 @@ class EncyclopediaResolver:
             
             for owner_label, owner_id in owner_mappings.items():
                 owner_lower = owner_label.lower()
+                
+                # Special case: "my name" should match the user's email to owner mapping
+                if ("my name" in query or "in my name" in query) and user_email:
+                    # Try to match user email to owner name
+                    if user_email and '@' in user_email:
+                        email_name = user_email.split('@')[0].lower()
+                        # Try to match email prefix to owner name (e.g., tyler.beagley -> Tyler Beagley)
+                        email_parts = email_name.replace('.', ' ').replace('_', ' ')
+                        if email_parts in owner_lower or any(part in owner_lower for part in email_parts.split()):
+                            exact_matches.append((owner_prop, owner_id))
+                            continue
                 
                 # Check for exact full name matches first (including possessive)
                 if owner_lower in query or f"{owner_lower}'s" in query:

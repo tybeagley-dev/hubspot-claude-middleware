@@ -38,6 +38,7 @@ class CompanyQuery(BaseModel):
     query: str
     limit: Optional[int] = 200
     properties: Optional[List[str]] = None
+    user_email: Optional[str] = None
 
 class CompanyResponse(BaseModel):
     companies: List[Dict[str, Any]]
@@ -328,7 +329,8 @@ async def encyclopedia_search(query: CompanyQuery, object_type: str = "companies
         results = await encyclopedia_resolver.resolve_and_search(
             object_type=object_type,
             user_query=query.query,
-            limit=query.limit or 200
+            limit=query.limit or 200,
+            user_email=query.user_email
         )
         
         # Translate properties for better readability if it's companies

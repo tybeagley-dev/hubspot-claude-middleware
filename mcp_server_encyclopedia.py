@@ -25,6 +25,9 @@ server = Server("hubspot-encyclopedia-mcp")
 import os
 MIDDLEWARE_URL = os.environ.get("HUBSPOT_MIDDLEWARE_URL", "https://hubspot-claude-middleware.onrender.com")
 
+# User identification for personalized queries
+USER_EMAIL = os.environ.get("USER_EMAIL", "").lower().strip()
+
 @server.list_tools()
 async def handle_list_tools() -> list[Tool]:
     """List available tools for encyclopedia-powered HubSpot searches"""
@@ -106,14 +109,25 @@ async def handle_call_tool(name: str, arguments: dict) -> Sequence[TextContent]:
                     )]
                 
                 # Use encyclopedia-powered search endpoint
+                search_payload = {"query": query, "limit": limit}
+                if USER_EMAIL:
+                    search_payload["user_email"] = USER_EMAIL
+                    
                 response = await client.post(
                     f"{MIDDLEWARE_URL}/search/encyclopedia",
-                    json={"query": query, "limit": limit},
+                    json=search_payload,
                     params={"object_type": "companies"}
                 )
                 
                 if response.status_code == 200:
                     data = response.json()
+                    
+                    # Check if we have any results and if not, suggest refreshing encyclopedia
+                    if data.get('total_returned', 0) == 0 and not data.get('resolved_filters'):
+                        return [TextContent(
+                            type="text",
+                            text="**❌ Encyclopedia Not Ready**\n\nNo encyclopedia data found for this search. The encyclopedia needs to be refreshed first.\n\n**Solution**: Use the 'refresh_encyclopedia' tool to load HubSpot data, then try your search again.\n\n**Alternative**: Check HubSpot directly for this data while the encyclopedia refreshes."
+                        )]
                     
                     # Format the response with clear encyclopedia authority and better context
                     total_returned = data.get('total_returned', 0)
