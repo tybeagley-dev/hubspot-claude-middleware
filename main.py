@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import os
+import json
 from services.hubspot_client import HubSpotClient
 from services.translator import PropertyTranslator
 from services.query_parser import QueryParser
@@ -10,6 +11,7 @@ from services.property_discovery import PropertyDiscoveryService
 from services.value_discovery import ValueDiscoveryService
 from services.encyclopedia import EncyclopediaService
 from services.encyclopedia_resolver import EncyclopediaResolver
+from services.hierarchical_encyclopedia_resolver import HierarchicalEncyclopediaResolver
 
 app = FastAPI(
     title="HubSpot Claude Middleware",
@@ -33,6 +35,7 @@ property_discovery = PropertyDiscoveryService()
 value_discovery = ValueDiscoveryService()
 encyclopedia = EncyclopediaService()
 encyclopedia_resolver = EncyclopediaResolver()
+hierarchical_resolver = HierarchicalEncyclopediaResolver()
 
 class CompanyQuery(BaseModel):
     query: str
@@ -277,6 +280,45 @@ async def refresh_encyclopedia():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Encyclopedia refresh failed: {str(e)}")
 
+@app.post("/encyclopedia/refresh-hierarchical")
+async def refresh_hierarchical_encyclopedia():
+    """Refresh and save hierarchical encyclopedia organized by property groups"""
+    try:
+        # Export hierarchical encyclopedia
+        hierarchical_data = await encyclopedia.export_hierarchical_encyclopedia()
+        
+        # Save hierarchical encyclopedia to files
+        saved_files = {}
+        for object_type in ["companies", "contacts", "deals", "tickets"]:
+            if object_type in hierarchical_data:
+                filename = f"hierarchical_{object_type}.json"
+                filepath = os.path.join(encyclopedia.encyclopedia_dir, filename)
+                
+                with open(filepath, 'w') as f:
+                    json.dump(hierarchical_data[object_type], f, indent=2)
+                
+                saved_files[object_type] = filepath
+        
+        # Save full hierarchical encyclopedia
+        full_filepath = os.path.join(encyclopedia.encyclopedia_dir, "hierarchical_full_encyclopedia.json")
+        with open(full_filepath, 'w') as f:
+            json.dump(hierarchical_data, f, indent=2)
+        
+        return {
+            "message": "Hierarchical encyclopedia refreshed successfully",
+            "export_info": hierarchical_data["export_info"],
+            "saved_files": saved_files,
+            "full_file": full_filepath,
+            "efficiency_benefits": {
+                "structure": "hierarchical",
+                "search_efficiency": "Dramatically reduced token usage via property group scoping",
+                "total_groups": hierarchical_data["export_info"].get("total_groups", 0),
+                "total_properties": hierarchical_data["export_info"].get("total_properties", 0)
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Hierarchical encyclopedia refresh failed: {str(e)}")
+
 @app.get("/encyclopedia/search")
 async def search_encyclopedia(search_term: str, object_type: Optional[str] = None):
     """Search encyclopedia for properties/values matching a term"""
@@ -325,8 +367,8 @@ async def encyclopedia_search(query: CompanyQuery, object_type: str = "companies
                 detail=f"Invalid object type. Must be one of: {valid_types}"
             )
         
-        # Use encyclopedia resolver for accurate query resolution
-        results = await encyclopedia_resolver.resolve_and_search(
+        # Use hierarchical encyclopedia resolver for maximum efficiency
+        results = await hierarchical_resolver.resolve_and_search(
             object_type=object_type,
             user_query=query.query,
             limit=query.limit or 200,

@@ -47,6 +47,102 @@ class PropertyDiscoveryService:
             print(f"Warning: Could not fetch properties for {object_type}: {e}")
             return {}
     
+    async def fetch_hierarchical_properties(self, object_type: str = "companies") -> Dict[str, Dict[str, Any]]:
+        """
+        Fetch properties organized by property groups for hierarchical encyclopedia
+        
+        Args:
+            object_type: HubSpot object type (companies, contacts, deals, tickets)
+        
+        Returns:
+            Dictionary mapping group_name -> {properties: {}, metadata: {}}
+        """
+        try:
+            endpoint = f"/crm/v3/properties/{object_type}"
+            response = await self.hubspot_client._make_request("GET", endpoint)
+            
+            properties = response.get("results", [])
+            return self._organize_by_groups(properties)
+            
+        except Exception as e:
+            print(f"Warning: Could not fetch hierarchical properties for {object_type}: {e}")
+            return {}
+    
+    def _organize_by_groups(self, raw_properties: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        """
+        Organize properties by their HubSpot property groups
+        
+        Args:
+            raw_properties: Raw property definitions from HubSpot API
+            
+        Returns:
+            Dictionary organized by property groups
+        """
+        groups = {}
+        
+        for prop in raw_properties:
+            internal_name = prop.get("name", "")
+            if not internal_name:
+                continue
+            
+            # Get property group (HubSpot API includes groupName)
+            group_name = prop.get("groupName", "other")
+            
+            # Normalize group name for consistency
+            normalized_group = self._normalize_group_name(group_name)
+            
+            # Initialize group if not exists
+            if normalized_group not in groups:
+                groups[normalized_group] = {
+                    "display_name": self._humanize_group_name(group_name),
+                    "properties": {},
+                    "property_count": 0,
+                    "original_group_name": group_name
+                }
+            
+            # Add property to group
+            readable_name = self._make_readable_name(prop)
+            groups[normalized_group]["properties"][internal_name] = {
+                "label": readable_name,
+                "type": prop.get("type", "string"),
+                "description": prop.get("description", ""),
+                "options": prop.get("options", []) if prop.get("type") == "enumeration" else []
+            }
+            groups[normalized_group]["property_count"] += 1
+        
+        return groups
+    
+    def _normalize_group_name(self, group_name: str) -> str:
+        """Normalize group name for consistent keys"""
+        if not group_name:
+            return "other"
+        
+        return group_name.lower().replace(" ", "_").replace("-", "_")
+    
+    def _humanize_group_name(self, group_name: str) -> str:
+        """Convert group name to human-readable format"""
+        if not group_name:
+            return "Other Properties"
+        
+        # Handle common group name patterns
+        group_map = {
+            "companyinformation": "Company Information",
+            "company_information": "Company Information", 
+            "billing_information": "Billing Information",
+            "customer_success": "Customer Success",
+            "web_analytics": "Web Analytics",
+            "social_media": "Social Media",
+            "conversion_information": "Conversion Information"
+        }
+        
+        normalized = group_name.lower().replace(" ", "_").replace("-", "_")
+        
+        if normalized in group_map:
+            return group_map[normalized]
+        
+        # Fallback: title case with spaces
+        return group_name.replace("_", " ").replace("-", " ").title()
+    
     def _process_properties(self, raw_properties: List[Dict[str, Any]]) -> Dict[str, str]:
         """
         Convert raw HubSpot property definitions to human-readable mappings

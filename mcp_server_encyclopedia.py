@@ -88,6 +88,15 @@ async def handle_list_tools() -> list[Tool]:
                 "properties": {},
                 "required": []
             }
+        ),
+        Tool(
+            name="refresh_hierarchical_encyclopedia",
+            description="Refresh encyclopedia with hierarchical structure for maximum efficiency (recommended for large datasets)",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
         )
     ]
 
@@ -304,6 +313,43 @@ async def handle_call_tool(name: str, arguments: dict) -> Sequence[TextContent]:
                     return [TextContent(
                         type="text",
                         text=f"Error refreshing encyclopedia: {response.status_code} - {response.text}"
+                    )]
+            
+            elif name == "refresh_hierarchical_encyclopedia":
+                response = await client.post(f"{MIDDLEWARE_URL}/encyclopedia/refresh-hierarchical")
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    
+                    result_text = "**🏗️ Hierarchical Encyclopedia Refresh Completed!**\n\n"
+                    
+                    export_info = data.get('export_info', {})
+                    result_text += f"**📊 Export Summary:**\n"
+                    result_text += f"- Structure: **Hierarchical** (organized by property groups)\n"
+                    result_text += f"- Total Groups: {export_info.get('total_groups', 0)}\n"
+                    result_text += f"- Total Properties: {export_info.get('total_properties', 0)}\n"
+                    result_text += f"- Export Time: {export_info.get('total_export_time_seconds', 0)} seconds\n\n"
+                    
+                    efficiency_benefits = data.get('efficiency_benefits', {})
+                    result_text += f"**⚡ Efficiency Benefits:**\n"
+                    result_text += f"- {efficiency_benefits.get('search_efficiency', 'Improved search performance')}\n"
+                    result_text += f"- Searches now focus only on relevant property groups\n"
+                    result_text += f"- Massive reduction in token usage for large datasets\n\n"
+                    
+                    result_text += f"**📁 Per Object Type:**\n"
+                    for obj_info in export_info.get('exported_objects', []):
+                        obj_type = obj_info.get('object_type', '')
+                        groups_count = obj_info.get('groups_count', 0)
+                        props_count = obj_info.get('total_properties', 0)
+                        result_text += f"- **{obj_type}**: {groups_count} groups, {props_count} properties\n"
+                    
+                    result_text += "\n**✅ Hierarchical encyclopedia is ready for ultra-efficient searches!**"
+                    
+                    return [TextContent(type="text", text=result_text)]
+                else:
+                    return [TextContent(
+                        type="text",
+                        text=f"Error refreshing hierarchical encyclopedia: {response.status_code} - {response.text}"
                     )]
             
             else:

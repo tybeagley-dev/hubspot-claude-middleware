@@ -230,6 +230,75 @@ class EncyclopediaService:
             }
         }
     
+    async def export_hierarchical_encyclopedia(self) -> Dict[str, Any]:
+        """
+        Export encyclopedia organized by HubSpot property groups for efficient searching
+        
+        Returns:
+            Hierarchical encyclopedia with properties grouped by categories
+        """
+        print("Starting hierarchical encyclopedia export...")
+        start_time = time.time()
+        
+        encyclopedia = {
+            "export_info": {
+                "timestamp": datetime.now().isoformat(),
+                "version": "2.0",
+                "structure": "hierarchical",
+                "exported_objects": []
+            }
+        }
+        
+        object_types = ["companies", "contacts", "deals", "tickets"]
+        
+        for obj_type in object_types:
+            print(f"Exporting hierarchical {obj_type}...")
+            obj_data = await self._export_hierarchical_object(obj_type)
+            encyclopedia[obj_type] = obj_data
+            
+            # Add summary to export info
+            encyclopedia["export_info"]["exported_objects"].append({
+                "object_type": obj_type,
+                "groups_count": len(obj_data.get("groups", {})),
+                "total_properties": sum(group.get("property_count", 0) for group in obj_data.get("groups", {}).values()),
+                "export_time_seconds": obj_data.get("export_time_seconds", 0)
+            })
+        
+        # Calculate totals
+        total_time = time.time() - start_time
+        encyclopedia["export_info"]["total_export_time_seconds"] = round(total_time, 2)
+        encyclopedia["export_info"]["total_groups"] = sum(obj.get("groups_count", 0) for obj in encyclopedia["export_info"]["exported_objects"])
+        encyclopedia["export_info"]["total_properties"] = sum(obj.get("total_properties", 0) for obj in encyclopedia["export_info"]["exported_objects"])
+        
+        print(f"✅ Hierarchical encyclopedia export completed in {total_time:.2f} seconds")
+        return encyclopedia
+    
+    async def _export_hierarchical_object(self, object_type: str) -> Dict[str, Any]:
+        """Export single object type with hierarchical structure"""
+        start_time = time.time()
+        
+        # Get hierarchical property groups
+        property_groups = await self.property_discovery.fetch_hierarchical_properties(object_type)
+        
+        # Get value mappings for enumeration properties
+        value_mappings = await self.value_discovery.discover_all_property_values(object_type)
+        
+        # Merge value mappings into hierarchical structure
+        for group_name, group_data in property_groups.items():
+            for prop_name, prop_info in group_data["properties"].items():
+                if prop_name in value_mappings:
+                    prop_info["value_mappings"] = value_mappings[prop_name]
+        
+        export_time = time.time() - start_time
+        
+        return {
+            "object_type": object_type,
+            "groups": property_groups,
+            "export_time_seconds": round(export_time, 2),
+            "total_groups": len(property_groups),
+            "total_properties": sum(group.get("property_count", 0) for group in property_groups.values())
+        }
+    
     def search_encyclopedia(self, search_term: str, object_type: str = None) -> Dict[str, Any]:
         """
         Search encyclopedia for properties/values matching a term
