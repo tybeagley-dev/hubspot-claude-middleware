@@ -9,6 +9,7 @@ from services.query_parser import QueryParser
 from services.property_discovery import PropertyDiscoveryService
 from services.value_discovery import ValueDiscoveryService
 from services.encyclopedia import EncyclopediaService
+from services.encyclopedia_resolver import EncyclopediaResolver
 
 app = FastAPI(
     title="HubSpot Claude Middleware",
@@ -31,10 +32,11 @@ query_parser = QueryParser()
 property_discovery = PropertyDiscoveryService()
 value_discovery = ValueDiscoveryService()
 encyclopedia = EncyclopediaService()
+encyclopedia_resolver = EncyclopediaResolver()
 
 class CompanyQuery(BaseModel):
     query: str
-    limit: Optional[int] = 100
+    limit: Optional[int] = 200
     properties: Optional[List[str]] = None
 
 class CompanyResponse(BaseModel):
@@ -308,6 +310,71 @@ async def load_encyclopedia_data(object_type: str):
         return data
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/search/encyclopedia")
+async def encyclopedia_search(query: CompanyQuery, object_type: str = "companies"):
+    """Encyclopedia-powered search using comprehensive label-to-internal mappings"""
+    try:
+        valid_types = ["companies", "contacts", "deals", "tickets"]
+        if object_type not in valid_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid object type. Must be one of: {valid_types}"
+            )
+        
+        # Use encyclopedia resolver for accurate query resolution
+        results = await encyclopedia_resolver.resolve_and_search(
+            object_type=object_type,
+            user_query=query.query,
+            limit=query.limit or 200
+        )
+        
+        # Translate properties for better readability if it's companies
+        if object_type == "companies" and results.get("results"):
+            translated_results = [
+                translator.translate_company_properties(company) 
+                for company in results["results"]
+            ]
+            results["results"] = translated_results
+        
+        return results
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Encyclopedia search failed: {str(e)}")
+
+@app.get("/encyclopedia/mappings/{object_type}")
+async def get_available_mappings(object_type: str):
+    """Get available label mappings for an object type from encyclopedia"""
+    try:
+        valid_types = ["companies", "contacts", "deals", "tickets"]
+        if object_type not in valid_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid object type. Must be one of: {valid_types}"
+            )
+        
+        mappings = encyclopedia_resolver.get_available_mappings(object_type)
+        return mappings
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/encyclopedia/search-mappings/{object_type}")
+async def search_mappings(object_type: str, search_term: str):
+    """Search for specific label mappings in encyclopedia"""
+    try:
+        valid_types = ["companies", "contacts", "deals", "tickets"]
+        if object_type not in valid_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid object type. Must be one of: {valid_types}"
+            )
+        
+        results = encyclopedia_resolver.search_mappings(object_type, search_term)
+        return results
+    
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
