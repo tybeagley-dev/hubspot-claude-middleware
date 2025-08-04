@@ -98,7 +98,7 @@ class EncyclopediaService:
         
         return encyclopedia
     
-    async def _sample_object_data(self, object_type: str, sample_size: int = 100) -> List[Dict[str, Any]]:
+    async def _sample_object_data(self, object_type: str, sample_size: int = 1000) -> List[Dict[str, Any]]:
         """
         Sample actual object data to understand real-world values
         
@@ -118,7 +118,7 @@ class EncyclopediaService:
                     f"/crm/v3/objects/{object_type}",
                     params={
                         "limit": sample_size,
-                        "properties": "name,domain,industry,hubspot_owner_id,account_status,lifecyclestage,numberofemployees,annualrevenue"
+                        "properties": "name,domain,industry,hubspot_owner_id,account_status,lifecyclestage,numberofemployees,annualrevenue,churnguard_current_risk_level,churnguard_trending_risk_level,churnguard_current_risk_reasons,churnguard_trending_risk_reasons,churnguard_last_updated"
                     }
                 )
             else:
