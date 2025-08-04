@@ -112,15 +112,24 @@ class EncyclopediaService:
         try:
             # Use the existing list method to get sample data
             if object_type == "companies":
-                # Get a sample of companies with all properties
-                response = await self.hubspot_client._make_request(
+                # First get companies with ChurnGuard data specifically
+                churnguard_companies = await self._sample_churnguard_companies(min(sample_size // 2, 500))
+                
+                # Then get regular sample for other properties
+                regular_response = await self.hubspot_client._make_request(
                     "GET",
                     f"/crm/v3/objects/{object_type}",
                     params={
-                        "limit": sample_size,
-                        "properties": "name,domain,industry,hubspot_owner_id,account_status,lifecyclestage,numberofemployees,annualrevenue,churnguard_current_risk_level,churnguard_trending_risk_level,churnguard_current_risk_reasons,churnguard_trending_risk_reasons,churnguard_last_updated"
+                        "limit": min(sample_size // 2, 500),
+                        "properties": "name,domain,industry,hubspot_owner_id,account_status,lifecyclestage,numberofemployees,annualrevenue"
                     }
                 )
+                
+                # Combine both samples
+                regular_companies = regular_response.get("results", [])
+                all_companies = churnguard_companies + regular_companies
+                
+                return all_companies
             else:
                 # For other object types, get basic sample
                 response = await self.hubspot_client._make_request(
@@ -133,6 +142,49 @@ class EncyclopediaService:
             
         except Exception as e:
             print(f"Warning: Could not sample {object_type} data: {e}")
+            return []
+    
+    async def _sample_churnguard_companies(self, limit: int) -> List[Dict[str, Any]]:
+        """
+        Sample companies that specifically have ChurnGuard risk data
+        
+        Args:
+            limit: Number of ChurnGuard companies to sample
+            
+        Returns:
+            List of companies with ChurnGuard data
+        """
+        try:
+            # Search for companies that have ChurnGuard current risk level set
+            search_request = {
+                "filterGroups": [{
+                    "filters": [{
+                        "propertyName": "churnguard_current_risk_level",
+                        "operator": "HAS_PROPERTY"
+                    }]
+                }],
+                "limit": limit,
+                "properties": [
+                    "name", "domain", "industry", "hubspot_owner_id", "account_status", 
+                    "lifecyclestage", "numberofemployees", "annualrevenue",
+                    "churnguard_current_risk_level", "churnguard_trending_risk_level",
+                    "churnguard_current_risk_reasons", "churnguard_trending_risk_reasons", 
+                    "churnguard_last_updated"
+                ]
+            }
+            
+            response = await self.hubspot_client._make_request(
+                "POST",
+                "/crm/v3/objects/companies/search",
+                json=search_request
+            )
+            
+            companies = response.get("results", [])
+            print(f"✅ Sampled {len(companies)} companies with ChurnGuard data")
+            return companies
+            
+        except Exception as e:
+            print(f"Warning: Could not sample ChurnGuard companies: {e}")
             return []
     
     async def save_encyclopedia_to_files(self, encyclopedia: Dict[str, Any]) -> Dict[str, str]:
