@@ -24,6 +24,42 @@ class EncyclopediaResolver:
                 value_count = len(data.get('value_mappings', {}))
                 print(f"✅ Loaded {object_type} encyclopedia: {value_count} properties with value mappings")
     
+    def translate_query_to_mappings(self, object_type: str, user_query: str, user_email: str = None) -> Dict[str, Any]:
+        """
+        Pure translation layer: Convert natural language to HubSpot property mappings
+        
+        Args:
+            object_type: HubSpot object type (companies, contacts, deals, tickets)
+            user_query: Natural language query from user
+            user_email: User's email for owner resolution
+            
+        Returns:
+            Translation results with suggested search parameters (NO actual data)
+        """
+        # Step 1: Analyze the query against encyclopedia
+        query_analysis = self._analyze_query_comprehensively(object_type, user_query)
+        
+        # Step 2: Resolve query to HubSpot filters using analysis
+        filters = self.resolve_query_to_filters(object_type, user_query, user_email)
+        
+        # Step 3: Generate human-readable explanation and next steps
+        translation_explanation = self._generate_translation_explanation(query_analysis, filters, user_query)
+        
+        return {
+            "translation_type": "natural_language_to_hubspot_api",
+            "original_query": user_query,
+            "object_type": object_type,
+            "detected_terms": query_analysis.get("detected_terms", []),
+            "hubspot_filters": filters,
+            "filter_count": len(filters),
+            "explanation": translation_explanation,
+            "next_steps": {
+                "use_regular_search": True,
+                "suggested_action": f"Use search_companies with these {len(filters)} filters to get actual company data",
+                "example_usage": f"search_companies(query='{user_query}', filters=provided_filters)"
+            }
+        }
+
     async def resolve_and_search(self, object_type: str, user_query: str, limit: int = 200, user_email: str = None) -> Dict[str, Any]:
         """
         Encyclopedia-first search: Analyze query thoroughly, then search
@@ -110,6 +146,39 @@ class EncyclopediaResolver:
         
         return analysis
     
+    def _generate_translation_explanation(self, query_analysis: Dict, filters: List[Dict], original_query: str) -> str:
+        """Generate human-readable explanation of the translation"""
+        if not filters:
+            return f"Could not translate '{original_query}' to HubSpot filters. This might be because the terms don't match any known property values in the encyclopedia, or the query needs to be more specific."
+        
+        explanations = []
+        explanations.append(f"Translated '{original_query}' into {len(filters)} HubSpot filter(s):")
+        
+        for i, filter_item in enumerate(filters, 1):
+            prop_name = filter_item.get("propertyName", "unknown")
+            operator = filter_item.get("operator", "EQ")
+            value = filter_item.get("value", "")
+            
+            # Make operator human-readable
+            operator_text = {
+                "EQ": "equals",
+                "NEQ": "does not equal", 
+                "HAS_PROPERTY": "has a value for",
+                "NOT_HAS_PROPERTY": "does not have a value for"
+            }.get(operator, operator)
+            
+            if operator == "HAS_PROPERTY":
+                explanations.append(f"{i}. Companies that {operator_text} '{prop_name}'")
+            else:
+                explanations.append(f"{i}. Companies where '{prop_name}' {operator_text} '{value}'")
+        
+        # Add context about detected terms
+        detected_terms = query_analysis.get("detected_terms", [])
+        if detected_terms:
+            explanations.append(f"Detected query terms: {', '.join(detected_terms)}")
+        
+        return " ".join(explanations)
+    
     def _generate_data_insights(self, query_analysis: Dict, filters: List[Dict], results: List[Dict], original_query: str) -> str:
         """Generate intelligent insights about the search results"""
         insights = []
@@ -193,6 +262,10 @@ class EncyclopediaResolver:
         # Date-based searches (renewal dates, etc.)
         date_filters = self._resolve_date_queries(query_lower, value_mappings)
         filters.extend(date_filters)
+        
+        # ChurnGuard risk-based searches
+        risk_filters = self._resolve_churnguard_risk_queries(query_lower, value_mappings)
+        filters.extend(risk_filters)
         
         # Generic property value searches
         generic_filters = self._resolve_generic_queries(query_lower, value_mappings)
@@ -397,6 +470,76 @@ class EncyclopediaResolver:
             filters.extend(city_filters)
         elif state_filters:
             filters.extend(state_filters)
+        
+        return filters
+    
+    def _resolve_churnguard_risk_queries(self, query: str, value_mappings: Dict) -> List[Dict[str, Any]]:
+        """Resolve ChurnGuard risk-based queries using encyclopedia"""
+        filters = []
+        
+        # Define risk term mappings
+        risk_terms = {
+            "high risk": ["high risk", "high-risk", "risky", "at risk"],
+            "medium risk": ["medium risk", "medium-risk", "moderate risk"],
+            "low risk": ["low risk", "low-risk", "stable", "safe"]
+        }
+        
+        # ChurnGuard property names to check
+        churnguard_properties = [
+            "churnguard_current_risk_level",
+            "churnguard_trending_risk_level"
+        ]
+        
+        # Check for risk terms in query
+        for risk_level, search_terms in risk_terms.items():
+            for term in search_terms:
+                if term in query:
+                    # Check if we have ChurnGuard properties in value mappings
+                    for prop_name in churnguard_properties:
+                        if prop_name in value_mappings:
+                            # Look for matching value in the mappings
+                            property_values = value_mappings[prop_name]
+                            
+                            # Try to find exact match first
+                            matching_value = None
+                            for label, internal_value in property_values.items():
+                                if risk_level.lower() in label.lower():
+                                    matching_value = internal_value
+                                    break
+                            
+                            # If no exact match, try the risk level directly
+                            if not matching_value:
+                                # Try common variations
+                                risk_variations = [
+                                    risk_level.title(),  # "High Risk"
+                                    risk_level.lower(),  # "high risk" 
+                                    risk_level.replace(" ", "_"),  # "high_risk"
+                                    risk_level.split()[0].title()  # "High"
+                                ]
+                                
+                                for variation in risk_variations:
+                                    if variation in property_values.values() or variation in property_values.keys():
+                                        matching_value = variation
+                                        break
+                            
+                            if matching_value:
+                                filters.append({
+                                    "propertyName": prop_name,
+                                    "operator": "EQ",
+                                    "value": matching_value
+                                })
+                                
+                                # Prefer current risk over trending if both are found
+                                if prop_name == "churnguard_current_risk_level":
+                                    return filters
+                    
+                    # If we found a match, don't check other terms
+                    if filters:
+                        break
+            
+            # If we found filters, don't check other risk levels
+            if filters:
+                break
         
         return filters
     

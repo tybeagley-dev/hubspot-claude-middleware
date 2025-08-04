@@ -314,7 +314,12 @@ class HierarchicalEncyclopediaResolver:
         """Execute search using HubSpot API"""
         try:
             if object_type == "companies":
-                results = await self.hubspot_client.search_companies(filters=filters, limit=limit)
+                # Ensure we request essential display properties
+                results = await self.hubspot_client.search_companies(
+                    filters=filters, 
+                    limit=limit,
+                    properties=["name", "domain", "hubspot_owner_id", "account_status", "next_renewal_date", "renewal_status", "city", "state", "industry"]
+                )
             else:
                 search_request = {
                     "filterGroups": [{"filters": filters}] if filters else [],

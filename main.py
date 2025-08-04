@@ -356,6 +356,29 @@ async def load_encyclopedia_data(object_type: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/translate/query")  
+async def translate_query(query: CompanyQuery, object_type: str = "companies"):
+    """Pure translation layer: Convert natural language to HubSpot API filters (NO data retrieval)"""
+    try:
+        valid_types = ["companies", "contacts", "deals", "tickets"]
+        if object_type not in valid_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid object type. Must be one of: {valid_types}"
+            )
+        
+        # Use translation-only method (no data fetching)
+        translation = encyclopedia_resolver.translate_query_to_mappings(
+            object_type=object_type,
+            user_query=query.query,
+            user_email=getattr(query, 'user_email', None)
+        )
+        
+        return translation
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/search/encyclopedia")
 async def encyclopedia_search(query: CompanyQuery, object_type: str = "companies"):
     """Encyclopedia-powered search using comprehensive label-to-internal mappings"""
